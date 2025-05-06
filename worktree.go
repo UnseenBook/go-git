@@ -285,14 +285,61 @@ func (w *Worktree) ResetSparsely(opts *ResetOptions, dirs []string) error {
 		return err
 	}
 
+	t, err := w.r.getTreeFromCommitHash(opts.Commit)
+	if err != nil {
+		return err
+	}
+
+	changes, err := w.diffTreeWithStaging(t, true)
+	if err != nil {
+		return err
+	}
+	var changedFiles []string
+	for _, ch := range changes {
+		a, err := ch.Action()
+		if err != nil {
+			return err
+		}
+		var name string
+		switch a {
+		case merkletrie.Modify, merkletrie.Insert:
+			name = ch.To.String()
+		case merkletrie.Delete:
+			name = ch.From.String()
+		}
+		changedFiles = append(changedFiles, name)
+	}
+
 	if opts.Mode == MergeReset {
-		unstaged, err := w.containsUnstagedChanges()
+		ch, err := w.diffStagingWithWorktree(false, true)
 		if err != nil {
 			return err
 		}
 
-		if unstaged {
-			return ErrUnstagedChanges
+		for _, c := range ch {
+			a, err := c.Action()
+			if err != nil {
+				return err
+			}
+
+			var name string
+			switch a {
+			case merkletrie.Modify, merkletrie.Insert:
+				name = c.To.String()
+			case merkletrie.Delete:
+				name = c.From.String()
+			}
+
+			if inFiles(changedFiles, name) {
+				return ErrUnstagedChanges
+			}
+		}
+	}
+
+	var removedFiles []string
+	if opts.Mode == MixedReset || opts.Mode == MergeReset || opts.Mode == HardReset {
+		if removedFiles, err = w.resetIndex(t, dirs, opts.Files, changes); err != nil {
+			return err
 		}
 	}
 
@@ -302,18 +349,6 @@ func (w *Worktree) ResetSparsely(opts *ResetOptions, dirs []string) error {
 
 	if opts.Mode == SoftReset {
 		return nil
-	}
-
-	t, err := w.r.getTreeFromCommitHash(opts.Commit)
-	if err != nil {
-		return err
-	}
-
-	var removedFiles []string
-	if opts.Mode == MixedReset || opts.Mode == MergeReset || opts.Mode == HardReset {
-		if removedFiles, err = w.resetIndex(t, dirs, opts.Files); err != nil {
-			return err
-		}
 	}
 
 	if opts.Mode == MergeReset || opts.Mode == HardReset {
@@ -370,18 +405,13 @@ func (w *Worktree) Reset(opts *ResetOptions) error {
 	return w.ResetSparsely(opts, nil)
 }
 
-func (w *Worktree) resetIndex(t *object.Tree, dirs []string, files []string) ([]string, error) {
+func (w *Worktree) resetIndex(t *object.Tree, dirs []string, files []string, changes merkletrie.Changes) ([]string, error) {
 	idx, err := w.r.Storer.Index()
 	if err != nil {
 		return nil, err
 	}
 
 	b := newIndexBuilder(idx)
-
-	changes, err := w.diffTreeWithStaging(t, true)
-	if err != nil {
-		return nil, err
-	}
 
 	var removedFiles []string
 	for _, ch := range changes {
