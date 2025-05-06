@@ -138,7 +138,9 @@ func (w *Worktree) PullContext(ctx context.Context, o *PullOptions) error {
 		Mode:   MergeReset,
 		Commit: ref.Hash(),
 	}); err != nil {
-		return err
+		// revert to the previous HEAD in case of errors
+		revErr := w.updateHEAD(head.Hash())
+		return errors.Join(err, revErr)
 	}
 
 	if o.RecurseSubmodules != NoRecurseSubmodules {
@@ -649,28 +651,6 @@ func (w *Worktree) checkoutChange(ch merkletrie.Change, t *object.Tree, idx *ind
 	}
 
 	return w.checkoutChangeRegularFile(name, a, t, e, idx)
-}
-
-func (w *Worktree) containsUnstagedChanges() (bool, error) {
-	ch, err := w.diffStagingWithWorktree(false, true)
-	if err != nil {
-		return false, err
-	}
-
-	for _, c := range ch {
-		a, err := c.Action()
-		if err != nil {
-			return false, err
-		}
-
-		if a == merkletrie.Insert {
-			continue
-		}
-
-		return true, nil
-	}
-
-	return false, nil
 }
 
 func (w *Worktree) setHEADCommit(commit plumbing.Hash) error {
