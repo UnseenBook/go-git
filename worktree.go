@@ -316,8 +316,14 @@ func (w *Worktree) ResetSparsely(opts *ResetOptions, dirs []string) error {
 		}
 	}
 
-	if opts.Mode == MergeReset || opts.Mode == HardReset {
+	if opts.Mode == MergeReset && len(removedFiles) > 0 {
 		if err := w.resetWorktree(t, removedFiles); err != nil {
+			return err
+		}
+	}
+
+	if opts.Mode == HardReset {
+		if err := w.resetWorktree(t, opts.Files); err != nil {
 			return err
 		}
 	}
